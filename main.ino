@@ -1,59 +1,80 @@
 #include <SPI.h>
 #include <Ethernet.h>
 #include <aWOT.h>
+#include "leds.h"
+// #include "requests.h"
+#include "options.h"
 
 EthernetServer server(80);
 Application app;
 
-void index(Request &req, Response &res) {
+// Functions
+void index(Request& req, Response& res) {
   res.print("Hello World!");
 }
 
-void redOn(Request &req, Response &res) {
-  digitalWrite(3, HIGH);
-  res.print(HIGH);
+void ledEnableDisable(Request& req, Response& res) {
+  char ledPin[64], action[64];
+  req.route("led", ledPin, 64);
+  req.route("action", action, 64);
+  digitalWrite(atoi(ledPin), (!strcmp(action, "on") ? HIGH : LOW));
+  res.print(!strcmp(action, "on") ? HIGH : LOW);
 }
 
-void redOff(Request &req, Response &res) {
-  digitalWrite(3, LOW);
-  res.print(LOW);
+void ledToggle(Request& req, Response& res) {
+  char ledPin[64];
+  req.route("led", ledPin, 64);
+  int currentLEDStatus = digitalRead(atoi(ledPin));
+  digitalWrite(atoi(ledPin), !currentLEDStatus);
+  res.print(!currentLEDStatus);
 }
 
+void ledStatus(Request& req, Response& res) {
+  char ledPin[64];
+  req.route("led", ledPin, 64);
+  res.print(digitalRead(atoi(ledPin)));
+}
 
 void setup() {
-  // put your setup code here, to run once:
-  pinMode(2, INPUT_PULLUP);
-  pinMode(3, INPUT_PULLUP);
-  pinMode(5, INPUT_PULLUP);
-  digitalWrite(2, LOW);
-  digitalWrite(3, LOW);
-  digitalWrite(5, LOW);
+  if (DEBUG) Serial.begin(9600);
+  initLEDS();  //Initalize and reset all LEDs to LO
 
-  byte mac[] = { 0xA8, 0x61, 0xAE, 0XF3, 0x90 };
-  byte ip[] = { 192, 168, 1, 54};
+  //Start server & init ethernet port
+  Ethernet.begin(mac, ip);
+  server.begin();
+  Serial.print("Server started at http://");
+  Serial.println(Ethernet.localIP());
 
-  if (Ethernet.linkStatus() == LinkOFF) {
+  while (Ethernet.linkStatus() == LinkOFF) {
     Serial.println("Ethernet cable is not connected.");
+    digitalWrite(2, HIGH);
+    delay(500);
+    digitalWrite(2, LOW);
+    delay(500);
   }
 
-  Serial.begin(9600);
-  Ethernet.begin(mac, ip);
-
+  // Routes
   app.get("/", &index);
-  app.get("/red/on", &redOn);
-  app.get("/red/off", &redOff);
-  server.begin();
-
-  Serial.print("Server started ");
-  Serial.println(Ethernet.localIP());
+  app.get("/:led/:action", &ledEnableDisable);
+  app.get("/:led/toggle", &ledToggle);
+  app.get("/:led/status", &ledStatus);
 }
 
 void loop() {
-  // put your main code here, to run repeatedly
   EthernetClient client = server.available();
 
-  if (client.connected()) {
-    app.process(&client);
-    client.stop();
-  }
+  //Ethernet disconnect warning
+  if (Ethernet.linkStatus() == LinkOFF) {
+    Serial.println("Ethernet cable is not connected.");
+    digitalWrite(2, HIGH);
+    delay(500);
+    digitalWrite(2, LOW);
+    delay(500);
+  } else
+
+    //Request process if no warning
+    if (client.connected()) {
+      app.process(&client);
+      client.stop();
+    }
 }
